@@ -1,57 +1,67 @@
 /**
- * Η κύρια λειτουργία ξεκινά όταν φορτωθεί η σελίδα.
- * Χρησιμοποιούμε τη 'fetch' για να διαβάσουμε το αρχείο data.csv.
+ * Διορθωμένη έκδοση: Δημιουργούμε πρώτα όλους τους κόμβους 
+ * και μετά τις συνδέσεις για να αποφύγουμε το σφάλμα "nonexistant target".
  */
 
-// Καταχώρηση του πρόσθετου Dagre για να μπορούμε να φτιάξουμε ιεραρχικό δέντρο
+// Ενεργοποίηση του εργαλείου αυτόματης διάταξης (Dagre)
 cytoscape.use(cytoscapeDagre);
 
 async function initGraph() {
     try {
-        // 1. Φόρτωση του CSV αρχείου
+        // Φόρτωση του αρχείου data.csv
         const response = await fetch('data.csv');
         const dataText = await response.text();
 
-        // 2. Επεξεργασία των γραμμών του CSV
+        // Διαχωρισμός του αρχείου σε γραμμές
         const lines = dataText.split('\n');
-        const elements = { nodes: [], edges: [] };
+        
+        // Εδώ θα αποθηκεύσουμε προσωρινά τους κόμβους και τις συνδέσεις
+        const nodes = [];
+        const edges = [];
 
-        // Προσπερνάμε την πρώτη γραμμή (επικεφαλίδες)
+        // --- 1ο ΠΕΡΑΣΜΑ: Δημιουργία όλων των Κόμβων (Φιλόσοφοι) ---
         for (let i = 1; i < lines.length; i++) {
             const line = lines[i].trim();
             if (!line) continue;
 
-            // Διαχωρισμός των πεδίων με βάση το ελληνικό ερωτηματικό
             const cols = line.split(';');
+            const id = cols[0].trim();
+            const name = cols[1].trim();
+            const birth = cols[2].trim();
 
-            // Αντιστοίχιση των πεδίων βάσει της δομής του αρχείου σου
-            const id = cols[0];
-            const name = cols[1];
-            const birth = cols[2];
-            const relType = cols[12]; // RelationType
-            const personB = cols[13]; // PersonB_ID
-
-            // Προσθήκη του Φιλοσόφου ως Κόμβου (Node)
-            elements.nodes.push({
+            // Προσθήκη του φιλοσόφου στη λίστα κόμβων
+            nodes.push({
                 data: { 
                     id: id, 
                     label: name + '\n(' + birth + ')' 
                 }
             });
+        }
 
-            // Αν υπάρχει σύνδεση, προσθήκη της Γραμμής (Edge)
+        // --- 2ο ΠΕΡΑΣΜΑ: Δημιουργία όλων των Συνδέσεων (Σχέσεις) ---
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+
+            const cols = line.split(';');
+            const id = cols[0].trim();         // PersonID
+            const relType = cols[12]?.trim(); // RelationType
+            const personB = cols[13]?.trim(); // PersonB_ID
+
+            // Έλεγχος αν υπάρχει έγκυρη σύνδεση με άλλον φιλόσοφο
             if (personB && personB !== "" && personB !== "-") {
                 let sourceId = id;
                 let targetId = personB;
 
-                // Αν η σχέση είναι "Μαθητής", αντιστρέφουμε τη φορά 
-                // ώστε το βέλος να δείχνει πάντα από τον παλαιότερο στον νεότερο
+                // Αν η σχέση δηλώνει μαθητή, αντιστρέφουμε τη φορά της γραμμής
+                // ώστε το βέλος να δείχνει πάντα προς το μέλλον (νεότερος)
                 if (relType.includes("Μαθητής")) {
                     sourceId = personB;
                     targetId = id;
                 }
 
-                elements.edges.push({
+                // Προσθήκη της σύνδεσης στη λίστα
+                edges.push({
                     data: { 
                         source: sourceId, 
                         target: targetId, 
@@ -61,10 +71,10 @@ async function initGraph() {
             }
         }
 
-        // 3. Δημιουργία του γραφήματος με το Cytoscape
+        // --- 3ο ΒΗΜΑ: Σχεδίαση του Γραφήματος ---
         const cy = cytoscape({
             container: document.getElementById('cy'),
-            elements: elements,
+            elements: { nodes: nodes, edges: edges },
             style: [
                 {
                     selector: 'node',
@@ -76,36 +86,42 @@ async function initGraph() {
                         'text-halign': 'center',
                         'color': '#fff',
                         'font-size': '10px',
-                        'width': '80px',
-                        'height': '40px',
-                        'shape': 'round-rectangle'
+                        'width': '100px',
+                        'height': '50px',
+                        'shape': 'round-rectangle',
+                        'border-width': 1,
+                        'border-color': '#2980b9'
                     }
                 },
                 {
                     selector: 'edge',
                     style: {
                         'width': 2,
-                        'line-color': '#ccc',
-                        'target-arrow-color': '#ccc',
+                        'line-color': '#bdc3c7',
+                        'target-arrow-color': '#bdc3c7',
                         'target-arrow-shape': 'triangle',
                         'curve-style': 'bezier',
                         'label': 'data(label)',
-                        'font-size': '8px'
+                        'font-size': '8px',
+                        'text-background-color': '#ffffff',
+                        'text-background-opacity': 1,
+                        'text-background-padding': '2px'
                     }
                 }
             ],
             layout: {
                 name: 'dagre',
-                rankDir: 'TB', // Top to Bottom (Πάνω προς Κάτω)
-                nodeSep: 50,   // Απόσταση μεταξύ των κόμβων
-                rankSep: 100   // Απόσταση μεταξύ των επιπέδων (χρονικά)
+                rankDir: 'TB', // Top to Bottom (Από πάνω προς τα κάτω)
+                nodeSep: 50,
+                rankSep: 100
             }
         });
 
     } catch (error) {
+        // Εμφάνιση σφάλματος στην κονσόλα αν κάτι πάει στραβά
         console.error('Σφάλμα κατά τη φόρτωση των δεδομένων:', error);
     }
 }
 
-// Εκκίνηση της διαδικασίας
+// Εκκίνηση της συνάρτησης
 initGraph();

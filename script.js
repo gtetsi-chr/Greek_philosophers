@@ -1,5 +1,5 @@
-// Ενεργοποίηση των απαραίτητων πρόσθετων
-cytoscape.use(cytoscapeCola);
+// Ενεργοποίηση του Dagre
+cytoscape.use(cytoscapeDagre);
 
 async function initGraph() {
     try {
@@ -7,19 +7,18 @@ async function initGraph() {
         const dataText = await response.text();
         const lines = dataText.split('\n');
         
-        const nodes = [];
+        let rawNodes = [];
         const edges = [];
-        const constraints = []; // Περιορισμοί για να μένουν οι παλιοί πάνω
         const existingNodeIds = new Set();
 
         function parseYear(dateStr) {
-            if (!dateStr) return 0;
+            if (!dateStr) return 2000; // Αν δεν έχει ημερομηνία, το βάζουμε στο τέλος
             let year = parseInt(dateStr.replace(/[^0-9]/g, ''));
             if (dateStr.includes('π.Χ.')) return -year;
             return year;
         }
 
-        // 1. Δημιουργία Κόμβων
+        // 1. Συλλογή Δεδομένων
         for (let i = 1; i < lines.length; i++) {
             const line = lines[i].trim();
             if (!line || line.split(';').length < 2) continue;
@@ -30,11 +29,14 @@ async function initGraph() {
             const birthStr = cols[2] ? cols[2].trim() : "";
             const birthYear = parseYear(birthStr);
 
-            nodes.push({
-                data: { id: id, label: name + '\n' + birthStr, year: birthYear }
+            rawNodes.push({
+                data: { id: id, label: name + '\n(' + birthStr + ')', year: birthYear }
             });
             existingNodeIds.add(id);
         }
+
+        // ΤΑΞΙΝΟΜΗΣΗ: Βάζουμε τους φιλοσόφους στη σειρά βάσει έτους γέννησης
+        rawNodes.sort((a, b) => a.data.year - b.data.year);
 
         // 2. Δημιουργία Συνδέσεων
         for (let i = 1; i < lines.length; i++) {
@@ -46,19 +48,29 @@ async function initGraph() {
             const targetId = cols[13]?.trim() || "";
 
             if (targetId && targetId !== "-" && existingNodeIds.has(sourceId) && existingNodeIds.has(targetId)) {
-                const s = relType.includes("Μαθητής") ? targetId : sourceId;
-                const t = relType.includes("Μαθητής") ? sourceId : targetId;
+                // Η ροή είναι ΠΑΝΤΑ από τον παλαιότερο (μικρότερο έτος) στον νεότερο
+                // Ανεξάρτητα αν το CSV λέει "Δάσκαλος" ή "Μαθητής"
+                let s = sourceId;
+                let t = targetId;
 
-                edges.push({ data: { source: s, target: t, label: relType } });
+                // Βρίσκουμε τα έτη για να σιγουρέψουμε τη φορά του βέλους (Πάνω -> Κάτω)
+                const nodeA = rawNodes.find(n => n.data.id === s);
+                const nodeB = rawNodes.find(n => n.data.id === t);
+                
+                if (nodeA && nodeB && nodeA.data.year > nodeB.data.year) {
+                    s = targetId;
+                    t = sourceId;
+                }
 
-                // Προσθήκη περιορισμού: Ο δάσκαλος (source) ΠΡΕΠΕΙ να είναι πιο πάνω από τον μαθητή (target)
-                constraints.push({ axis: 'y', left: s, right: t, gap: 100 });
+                edges.push({
+                    data: { source: s, target: t, label: relType }
+                });
             }
         }
 
         const cy = cytoscape({
             container: document.getElementById('cy'),
-            elements: { nodes: nodes, edges: edges },
+            elements: { nodes: rawNodes, edges: edges },
             style: [
                 {
                     selector: 'node',
@@ -69,9 +81,9 @@ async function initGraph() {
                         'text-valign': 'center',
                         'text-halign': 'center',
                         'color': '#fff',
-                        'font-size': '11px',
-                        'width': '120px',
-                        'height': '50px',
+                        'font-size': '12px',
+                        'width': '140px',
+                        'height': '60px',
                         'shape': 'round-rectangle',
                         'border-width': 2,
                         'border-color': '#34495e'
@@ -84,30 +96,24 @@ async function initGraph() {
                         'line-color': '#bdc3c7',
                         'target-arrow-color': '#bdc3c7',
                         'target-arrow-shape': 'triangle',
-                        'curve-style': 'bezier', // Καμπύλες για να φαίνονται οι παράλληλες συνδέσεις
-                        'control-point-step-size': 40,
-                        'label': 'data(label)',
-                        'font-size': '9px',
-                        'color': '#7f8c8d',
-                        'text-background-opacity': 1,
-                        'text-background-color': '#ffffff'
+                        'curve-style': 'taxi', // Ορθογώνιες γραμμές για να μη μπλέκονται
+                        'taxi-direction': 'vertical',
+                        'taxi-turn': '50px',
+                        'edge-distances': 'node-position'
                     }
                 }
             ],
             layout: {
-                name: 'cola',
-                animate: true,
-                refresh: 1,
-                maxSimulationTime: 4000,
-                ungrabifyWhileSimulating: false,
-                fit: true,
-                padding: 50,
-                nodeSpacing: 40, // Ελάχιστη απόσταση μεταξύ κόμβων (για να μη συμπίπτουν)
-                flow: { axis: 'y', minSeparation: 150 }, // Επιβολή ροής από πάνω προς τα κάτω
-                alignment: { y: [] }, // Θα μπορούσαμε να ευθυγραμμίσουμε ανά έτος εδώ
-                gapInequalities: constraints // Χρήση των περιορισμών δασκάλου-μαθητή
+                name: 'dagre',
+                rankDir: 'TB',    // Top to Bottom
+                nodeSep: 100,     // Μεγάλη οριζόντια απόσταση
+                rankSep: 150,     // Μεγάλη κάθετη απόσταση (χρονικά επίπεδα)
+                directed: true,
+                padding: 50
             }
         });
+
+        cy.fit();
 
     } catch (error) {
         console.error('Σφάλμα:', error);

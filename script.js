@@ -1,4 +1,5 @@
-cytoscape.use(cytoscapeDagre);
+// Ενεργοποίηση των απαραίτητων πρόσθετων
+cytoscape.use(cytoscapeCola);
 
 async function initGraph() {
     try {
@@ -6,9 +7,10 @@ async function initGraph() {
         const dataText = await response.text();
         const lines = dataText.split('\n');
         
-        const elements = [];
+        const nodes = [];
+        const edges = [];
+        const constraints = []; // Περιορισμοί για να μένουν οι παλιοί πάνω
         const existingNodeIds = new Set();
-        const yearGroups = {}; // Για να μετράμε πόσοι είναι στην ίδια χρονιά
 
         function parseYear(dateStr) {
             if (!dateStr) return 0;
@@ -17,46 +19,24 @@ async function initGraph() {
             return year;
         }
 
-        // --- 1. Δημιουργία Χρονικού Άξονα (Χάρακας αριστερά) ---
-        for (let y = -700; y <= 500; y += 100) {
-            elements.push({
-                group: 'nodes',
-                data: { id: 'year-' + y, label: (y < 0 ? Math.abs(y) + ' π.Χ.' : y + ' μ.Χ.') },
-                position: { x: 50, y: (y + 1000) * 5 },
-                classes: 'timeline-mark',
-                selectable: false
-            });
-        }
-
-        // --- 2. Επεξεργασία Φιλοσόφων ---
+        // 1. Δημιουργία Κόμβων
         for (let i = 1; i < lines.length; i++) {
             const line = lines[i].trim();
-            if (!line) continue;
+            if (!line || line.split(';').length < 2) continue;
+            
             const cols = line.split(';');
-            if (cols.length < 2) continue;
-
             const id = cols[0].trim();
             const name = cols[1].trim();
             const birthStr = cols[2] ? cols[2].trim() : "";
             const birthYear = parseYear(birthStr);
 
-            // Υπολογισμός οριζόντιας θέσης για να μην συμπίπτουν
-            if (!yearGroups[birthYear]) yearGroups[birthYear] = 0;
-            yearGroups[birthYear]++;
-            
-            // Το X αυξάνεται όσο υπάρχουν περισσότεροι στην ίδια χρονιά
-            const offsetX = 200 + (yearGroups[birthYear] * 150); 
-            const offsetY = (birthYear + 1000) * 5;
-
-            elements.push({
-                group: 'nodes',
-                data: { id: id, label: name + '\n(' + birthStr + ')', year: birthYear },
-                position: { x: offsetX, y: offsetY }
+            nodes.push({
+                data: { id: id, label: name + '\n' + birthStr, year: birthYear }
             });
             existingNodeIds.add(id);
         }
 
-        // --- 3. Συνδέσεις ---
+        // 2. Δημιουργία Συνδέσεων
         for (let i = 1; i < lines.length; i++) {
             const line = lines[i].trim();
             if (!line) continue;
@@ -66,20 +46,19 @@ async function initGraph() {
             const targetId = cols[13]?.trim() || "";
 
             if (targetId && targetId !== "-" && existingNodeIds.has(sourceId) && existingNodeIds.has(targetId)) {
-                elements.push({
-                    group: 'edges',
-                    data: { 
-                        source: relType.includes("Μαθητής") ? targetId : sourceId, 
-                        target: relType.includes("Μαθητής") ? sourceId : targetId, 
-                        label: relType 
-                    }
-                });
+                const s = relType.includes("Μαθητής") ? targetId : sourceId;
+                const t = relType.includes("Μαθητής") ? sourceId : targetId;
+
+                edges.push({ data: { source: s, target: t, label: relType } });
+
+                // Προσθήκη περιορισμού: Ο δάσκαλος (source) ΠΡΕΠΕΙ να είναι πιο πάνω από τον μαθητή (target)
+                constraints.push({ axis: 'y', left: s, right: t, gap: 100 });
             }
         }
 
         const cy = cytoscape({
             container: document.getElementById('cy'),
-            elements: elements,
+            elements: { nodes: nodes, edges: edges },
             style: [
                 {
                     selector: 'node',
@@ -90,20 +69,12 @@ async function initGraph() {
                         'text-valign': 'center',
                         'text-halign': 'center',
                         'color': '#fff',
-                        'font-size': '10px',
-                        'width': '100px',
-                        'height': '45px',
-                        'shape': 'round-rectangle'
-                    }
-                },
-                {
-                    selector: '.timeline-mark',
-                    style: {
-                        'background-color': '#e74c3c',
-                        'width': '60px',
-                        'shape': 'rectangle',
-                        'font-weight': 'bold',
-                        'font-size': '12px'
+                        'font-size': '11px',
+                        'width': '120px',
+                        'height': '50px',
+                        'shape': 'round-rectangle',
+                        'border-width': 2,
+                        'border-color': '#34495e'
                     }
                 },
                 {
@@ -111,18 +82,32 @@ async function initGraph() {
                     style: {
                         'width': 2,
                         'line-color': '#bdc3c7',
+                        'target-arrow-color': '#bdc3c7',
                         'target-arrow-shape': 'triangle',
-                        'curve-style': 'taxi',
-                        'taxi-direction': 'vertical'
+                        'curve-style': 'bezier', // Καμπύλες για να φαίνονται οι παράλληλες συνδέσεις
+                        'control-point-step-size': 40,
+                        'label': 'data(label)',
+                        'font-size': '9px',
+                        'color': '#7f8c8d',
+                        'text-background-opacity': 1,
+                        'text-background-color': '#ffffff'
                     }
                 }
             ],
-            layout: { name: 'preset' }
+            layout: {
+                name: 'cola',
+                animate: true,
+                refresh: 1,
+                maxSimulationTime: 4000,
+                ungrabifyWhileSimulating: false,
+                fit: true,
+                padding: 50,
+                nodeSpacing: 40, // Ελάχιστη απόσταση μεταξύ κόμβων (για να μη συμπίπτουν)
+                flow: { axis: 'y', minSeparation: 150 }, // Επιβολή ροής από πάνω προς τα κάτω
+                alignment: { y: [] }, // Θα μπορούσαμε να ευθυγραμμίσουμε ανά έτος εδώ
+                gapInequalities: constraints // Χρήση των περιορισμών δασκάλου-μαθητή
+            }
         });
-
-        // Αυτόματη εστίαση στα δεδομένα
-        cy.fit();
-        cy.zoom(0.8); // Ελαφρύ zoom out για να βλέπουμε το περιθώριο
 
     } catch (error) {
         console.error('Σφάλμα:', error);

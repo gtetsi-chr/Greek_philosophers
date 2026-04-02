@@ -1,77 +1,83 @@
-/**
- * Διορθωμένη έκδοση: Δημιουργούμε πρώτα όλους τους κόμβους 
- * και μετά τις συνδέσεις για να αποφύγουμε το σφάλμα "nonexistant target".
- */
-
-// Ενεργοποίηση του εργαλείου αυτόματης διάταξης (Dagre)
+// Ενεργοποίηση του Dagre για ιεραρχική διάταξη
 cytoscape.use(cytoscapeDagre);
 
 async function initGraph() {
     try {
-        // Φόρτωση του αρχείου data.csv
+        // 1. Φόρτωση του αρχείου
         const response = await fetch('data.csv');
         const dataText = await response.text();
 
-        // Διαχωρισμός του αρχείου σε γραμμές
+        // 2. Προετοιμασία δεδομένων
         const lines = dataText.split('\n');
-        
-        // Εδώ θα αποθηκεύσουμε προσωρινά τους κόμβους και τις συνδέσεις
         const nodes = [];
         const edges = [];
+        
+        // Χρησιμοποιούμε ένα Set για να ξέρουμε ποια IDs έχουμε δημιουργήσει πραγματικά
+        const existingNodeIds = new Set();
 
-        // --- 1ο ΠΕΡΑΣΜΑ: Δημιουργία όλων των Κόμβων (Φιλόσοφοι) ---
+        // --- 1ο ΠΕΡΑΣΜΑ: Δημιουργία Κόμβων ---
         for (let i = 1; i < lines.length; i++) {
             const line = lines[i].trim();
             if (!line) continue;
 
             const cols = line.split(';');
+            if (cols.length < 2) continue;
+
+            // trim() για να φύγουν κενά, αντικατάσταση περίεργων χαρακτήρων
             const id = cols[0].trim();
             const name = cols[1].trim();
-            const birth = cols[2].trim();
+            const birth = cols[2] ? cols[2].trim() : "";
 
-            // Προσθήκη του φιλοσόφου στη λίστα κόμβων
+            // Αποθήκευση του ID ώστε να ξέρουμε ότι υπάρχει
             nodes.push({
                 data: { 
                     id: id, 
-                    label: name + '\n(' + birth + ')' 
+                    label: name + '\n' + birth 
                 }
             });
+            existingNodeIds.add(id);
         }
 
-        // --- 2ο ΠΕΡΑΣΜΑ: Δημιουργία όλων των Συνδέσεων (Σχέσεις) ---
+        // --- 2ο ΠΕΡΑΣΜΑ: Δημιουργία Συνδέσεων (με αυστηρό έλεγχο) ---
         for (let i = 1; i < lines.length; i++) {
             const line = lines[i].trim();
             if (!line) continue;
 
             const cols = line.split(';');
-            const id = cols[0].trim();         // PersonID
-            const relType = cols[12]?.trim(); // RelationType
-            const personB = cols[13]?.trim(); // PersonB_ID
+            if (cols.length < 14) continue;
 
-            // Έλεγχος αν υπάρχει έγκυρη σύνδεση με άλλον φιλόσοφο
-            if (personB && personB !== "" && personB !== "-") {
-                let sourceId = id;
-                let targetId = personB;
+            const sourceId = cols[0].trim();
+            const relType = cols[12] ? cols[12].trim() : "";
+            const targetId = cols[13] ? cols[13].trim() : "";
 
-                // Αν η σχέση δηλώνει μαθητή, αντιστρέφουμε τη φορά της γραμμής
-                // ώστε το βέλος να δείχνει πάντα προς το μέλλον (νεότερος)
+            // ΕΛΕΓΧΟΣ: Φτιάξε τη σύνδεση ΜΟΝΟ αν υπάρχουν και τα δύο IDs στη λίστα μας
+            if (targetId && targetId !== "-" && existingNodeIds.has(sourceId) && existingNodeIds.has(targetId)) {
+                
+                let s = sourceId;
+                let t = targetId;
+
+                // Αντιστροφή αν είναι μαθητής για να πηγαίνει το βέλος προς τα κάτω (νεότερος)
                 if (relType.includes("Μαθητής")) {
-                    sourceId = personB;
-                    targetId = id;
+                    s = targetId;
+                    t = sourceId;
                 }
 
-                // Προσθήκη της σύνδεσης στη λίστα
                 edges.push({
                     data: { 
-                        source: sourceId, 
-                        target: targetId, 
+                        source: s, 
+                        target: t, 
                         label: relType 
                     }
                 });
+            } else {
+                // Αν δεν βρει το ID, απλά το καταγράφει στην κονσόλα χωρίς να "κρασάρει"
+                if (targetId && targetId !== "-") {
+                    console.warn(`Παράλειψη σύνδεσης: Το ID ${targetId} δεν βρέθηκε στους φιλοσόφους.`);
+                }
             }
         }
 
-        // --- 3ο ΒΗΜΑ: Σχεδίαση του Γραφήματος ---
+        // --- 3ο ΒΗΜΑ: Σχεδίαση ---
         const cy = cytoscape({
             container: document.getElementById('cy'),
             elements: { nodes: nodes, edges: edges },
@@ -79,49 +85,43 @@ async function initGraph() {
                 {
                     selector: 'node',
                     style: {
-                        'background-color': '#3498db',
+                        'background-color': '#2c3e50',
                         'label': 'data(label)',
                         'text-wrap': 'wrap',
                         'text-valign': 'center',
                         'text-halign': 'center',
                         'color': '#fff',
                         'font-size': '10px',
-                        'width': '100px',
+                        'width': '110px',
                         'height': '50px',
-                        'shape': 'round-rectangle',
-                        'border-width': 1,
-                        'border-color': '#2980b9'
+                        'shape': 'round-rectangle'
                     }
                 },
                 {
                     selector: 'edge',
                     style: {
                         'width': 2,
-                        'line-color': '#bdc3c7',
-                        'target-arrow-color': '#bdc3c7',
+                        'line-color': '#95a5a6',
+                        'target-arrow-color': '#95a5a6',
                         'target-arrow-shape': 'triangle',
                         'curve-style': 'bezier',
                         'label': 'data(label)',
                         'font-size': '8px',
-                        'text-background-color': '#ffffff',
-                        'text-background-opacity': 1,
-                        'text-background-padding': '2px'
+                        'color': '#7f8c8d'
                     }
                 }
             ],
             layout: {
                 name: 'dagre',
-                rankDir: 'TB', // Top to Bottom (Από πάνω προς τα κάτω)
-                nodeSep: 50,
-                rankSep: 100
+                rankDir: 'TB',
+                nodeSep: 60,
+                rankSep: 120
             }
         });
 
     } catch (error) {
-        // Εμφάνιση σφάλματος στην κονσόλα αν κάτι πάει στραβά
-        console.error('Σφάλμα κατά τη φόρτωση των δεδομένων:', error);
+        console.error('Σφάλμα:', error);
     }
 }
 
-// Εκκίνηση της συνάρτησης
 initGraph();

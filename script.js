@@ -1,70 +1,70 @@
-// Χρησιμοποιούμε το Dagre για την ιεραρχική στοίχιση
-cytoscape.use(cytoscapeDagre);
-
 async function initGraph() {
     try {
         const response = await fetch('data.csv');
         const dataText = await response.text();
         const lines = dataText.split('\n');
         
-        const nodes = [];
-        const edges = [];
+        const elements = [];
         const existingNodeIds = new Set();
 
-        // 1ο Πέρασμα: Κόμβοι
+        // Βοηθητική συνάρτηση: Μετατρέπει το "400 π.Χ." σε -400 και το "50 μ.Χ." σε 50
+        function parseYear(dateStr) {
+            if (!dateStr) return 0;
+            let year = parseInt(dateStr.replace(/[^0-9]/g, ''));
+            if (dateStr.includes('π.Χ.')) return -year;
+            return year;
+        }
+
+        // 1. Δημιουργία Κόμβων
         for (let i = 1; i < lines.length; i++) {
             const line = lines[i].trim();
             if (!line) continue;
             const cols = line.split(';');
-            if (cols.length < 2) continue;
-
+            
             const id = cols[0].trim();
             const name = cols[1].trim();
-            const birth = cols[2] ? cols[2].trim() : "";
+            const birthStr = cols[2] ? cols[2].trim() : "";
+            const birthYear = parseYear(birthStr);
 
-            nodes.push({
-                data: { id: id, label: name + '\n' + birth }
+            elements.push({
+                group: 'nodes',
+                data: { 
+                    id: id, 
+                    label: name + '\n' + birthStr,
+                    year: birthYear 
+                },
+                // Υπολογίζουμε τη θέση Y: το 2000 π.Χ. είναι στην κορυφή (0)
+                // Κάθε έτος ισούται με 2 pixels απόσταση
+                position: { x: 500, y: (birthYear + 2000) * 2 }
             });
             existingNodeIds.add(id);
         }
 
-        // 2ο Πέρασμα: Συνδέσεις
+        // 2. Δημιουργία Συνδέσεων
         for (let i = 1; i < lines.length; i++) {
             const line = lines[i].trim();
             if (!line) continue;
             const cols = line.split(';');
             const sourceId = cols[0].trim();
-            const relType = cols[12] ? cols[12].trim() : "";
-            const targetId = cols[13] ? cols[13].trim() : "";
+            const relType = cols[12]?.trim();
+            const targetId = cols[13]?.trim();
 
             if (targetId && targetId !== "-" && existingNodeIds.has(sourceId) && existingNodeIds.has(targetId)) {
-                let s = sourceId;
-                let t = targetId;
-                
-                // ΠΑΝΤΑ από τον μικρότερο κωδικό (παλιό) στον μεγαλύτερο (νέο) 
-                // ή βάσει του RelationType για να διατηρηθεί η κάθετη ροή
-                if (relType.includes("Μαθητής")) {
-                    s = targetId; t = sourceId;
-                }
-
-                edges.push({
-                    data: { source: s, target: t, label: relType }
+                elements.push({
+                    group: 'edges',
+                    data: { 
+                        source: relType.includes("Μαθητής") ? targetId : sourceId, 
+                        target: relType.includes("Μαθητής") ? sourceId : targetId, 
+                        label: relType 
+                    }
                 });
             }
         }
 
-        // 3ο Βήμα: Ρύθμιση Γραφήματος
+        // 3. Σχεδίαση
         const cy = cytoscape({
             container: document.getElementById('cy'),
-            elements: { nodes: nodes, edges: edges },
-            
-            // Ρυθμίσεις αλληλεπίδρασης
-            zoomingEnabled: true,
-            userZoomingEnabled: true,
-            panningEnabled: true,
-            userPanningEnabled: true,
-            wheelSensitivity: 0.2, // Μαλακό ζουμ με τη ροδέλα
-
+            elements: elements,
             style: [
                 {
                     selector: 'node',
@@ -73,36 +73,27 @@ async function initGraph() {
                         'label': 'data(label)',
                         'text-wrap': 'wrap',
                         'text-valign': 'center',
-                        'text-halign': 'center',
-                        'color': '#fff',
+                        'text-halign': 'right', // Το όνομα στα δεξιά του κόμβου
+                        'color': '#333',
                         'font-size': '12px',
-                        'width': '120px',
-                        'height': '60px',
-                        'shape': 'round-rectangle',
-                        'padding': '10px'
+                        'width': '15px',
+                        'height': '15px',
+                        'shape': 'ellipse'
                     }
                 },
                 {
                     selector: 'edge',
                     style: {
-                        'width': 3,
-                        'line-color': '#bdc3c7',
-                        'target-arrow-color': '#bdc3c7',
+                        'width': 1.5,
+                        'line-color': '#95a5a6',
                         'target-arrow-shape': 'triangle',
-                        'curve-style': 'taxi', // Κάνει τις γραμμές πιο "ορθογώνιες" σαν οργανόγραμμα
-                        'taxi-direction': 'vertical',
-                        'label': 'data(label)',
-                        'font-size': '10px',
-                        'edge-text-rotation': 'autorotate'
+                        'curve-style': 'bezier',
+                        'opacity': 0.6
                     }
                 }
             ],
-            layout: {
-                name: 'dagre',
-                rankDir: 'TB',    // ΑΥΣΤΗΡΑ Top to Bottom
-                nodeSep: 80,      // Περισσότερο πλάτος ανάμεσα στους φιλοσόφους
-                rankSep: 200,     // Πολύ μεγαλύτερο κενό ανάμεσα στις εποχές (κάθετα)
-                animate: true     // Ομαλή εμφάνιση
+            layout: { 
+                name: 'preset' // ΣΗΜΑΝΤΙΚΟ: Χρησιμοποιεί τις θέσεις X,Y που δώσαμε εμείς
             }
         });
 
@@ -110,5 +101,4 @@ async function initGraph() {
         console.error('Σφάλμα:', error);
     }
 }
-
 initGraph();
